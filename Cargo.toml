@@ -1,0 +1,10 @@
+[package]
+name = "pt2"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+goblin = "0.10.5"
+inkwell = { version = "0.8.0", features = ["llvm20-1"] }
+log = "0.4.29"
