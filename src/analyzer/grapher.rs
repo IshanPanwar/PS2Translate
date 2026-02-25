@@ -10,103 +10,81 @@ use goblin::{
 };
 use inkwell::{OptimizationLevel, builder::Builder, context::Context, module::Module};
 use log;
+use rangemap::map::RangeMap;
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    option::Iter,
     sync::Arc,
 };
 
-struct BasicBlk {
-    pub list: Vec<EE>,
-    pub next: Vec<Arc<BasicBlk>>,
-    pub prev: Vec<Arc<BasicBlk>>,
+pub struct Block {
+    insts: Vec<EE>,
+    next: HashSet<Arc<Block>>,
+    prev: HashSet<Arc<Block>>,
 }
 
-struct SymbolTable {
-    pub symbols: HashMap<u64, String>,
+pub struct ProgAnalysis<'a> {
+    symbol_table: HashMap<u64, String>,
+    map: RangeMap<Iter<'a, u64>, Block>,
 }
 
-pub struct Program {
-    blk_list: Vec<BasicBlk>,
-    symbol_table: SymbolTable,
-}
-
-impl BasicBlk{
-    pub fn new() -> Self {
-        Self{
-            list: Vec::new(),
-            next: Vec::new(),
-            prev: Vec::new()
-        }
-    }
-}
-
-impl Program {
-    pub fn init() -> Self {
-        return Self {
-            blk_list: Vec::new(),
-            symbol_table: SymbolTable {
-                symbols: HashMap::new(),
-            },
-        };
-    }
-    pub fn begin(&mut self, path: &str) -> Result<()> {
-        let buffer = match fs::read(path) {
-            Ok(i) => i,
-            Err(_) => return Err(anyhow!("Failed to parse given file")),
-        };
-        let buf = match Object::parse(&buffer) {
-            Ok(i) => i,
-            Err(_) => return Err(anyhow!("Failed to parse given exec file")),
-        };
-        match buf {
-            Object::Elf(elf) => {
-                if Program::contains_text(&elf) {
-                    self.parse_text(elf, buffer)
-                } else if Program::contains_pt_load(&elf) {
-                    self.parse_pt_load(elf, buffer)
+impl Block {
+    pub fn new(buf: &[u8]) -> Result<(Self, u64)> {
+        let mut insts = Vec::new();
+        let mut iterator = buf.chunks_exact(4).enumerate().peekable();
+        while let Some((idx, inst)) = iterator.next() {
+            if iterator.peek().is_none() {
+                return OK((
+                    Self {
+                        insts: insts,
+                        next: HashSet::new(),
+                        prev: HashSet::new(),
+                    },
+                    idx as u64 * 4,
+                ));
+            } else {
+                let trans = EE::translate(u32::from_le_bytes([inst[0], inst[1], inst[2], inst[3]]));
+                if matches!(trans, EE::J(..))
+                    || matches!(trans, EE::JAL(..))
+                    || matches!(trans, EE::BEQ(..))
+                    || matches!(trans, EE::BNE(..))
+                    || matches!(trans, EE::BLEZ(..))
+                    || matches!(trans, EE::BGTZ(..))
+                    || matches!(trans, EE::BEQL(..))
+                    || matches!(trans, EE::BNEL(..))
+                    || matches!(trans, EE::BLEZL(..))
+                    || matches!(trans, EE::BGTZL(..))
+                    || matches!(trans, EE::SPECIAL(Special::JR(..)))
+                    || matches!(trans, EE::SPECIAL(Special::JALR(..)))
+                    || matches!(trans, EE::SPECIAL(Special::SYSCALL(..)))
+                    || matches!(trans, EE::REGIMM(Regimm::BLTZ(..)))
+                    || matches!(trans, EE::REGIMM(Regimm::BGEZ(..)))
+                    || matches!(trans, EE::REGIMM(Regimm::BLTZL(..)))
+                    || matches!(trans, EE::REGIMM(Regimm::BGEZL(..)))
+                    || matches!(trans, EE::REGIMM(Regimm::BLTZAL(..)))
+                    || matches!(trans, EE::REGIMM(Regimm::BGEZAL(..)))
+                    || matches!(trans, EE::REGIMM(Regimm::BLTZALL(..)))
+                    || matches!(trans, EE::REGIMM(Regimm::BGEZALL(..)))
+                {
+                    return Ok((
+                        Self {
+                            insts: insts,
+                            next: HashSet::new(),
+                            prev: HashSet::new(),
+                        },
+                        idx as u64 * 4,
+                    ));
+                } else {
+                    insts.push(trans);
                 }
             }
-            _ => return Err(anyhow!("Provided file is not Elf file")),
         }
-        Ok(())
+        return Err(anyhow!("Failed to create block"));
     }
-    fn contains_text(elf: &Elf) -> bool {
-        for section in elf.section_headers.iter() {
-            if let Some(name) = elf.shdr_strtab.get_at(section.sh_name) {
-                if name == ".text" {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-    fn contains_pt_load(elf: &Elf) -> bool {
-        for ph in elf.program_headers.iter() {
-            if ph.p_type == PT_LOAD && (ph.p_flags & PF_X) != 0 {
-                return true;
-            }
-        }
-        return false;
-    }
-    fn parse_text(&mut self, elf: Elf, buffer: Vec<u8>) {
-        let pending: Vec<u32> = Vec::new();
-        let processed: HashSet<u32> = HashSet::new();
-        for sec in elf.section_headers.iter() {
-            if let Some(name) = elf.shdr_strtab.get_at(sec.sh_name) && name == ".text" {
-                let start  = sec.sh_offset as usize;
-                let end = start + sec.sh_size as usize;
-                let code_bytes = &buffer[start..end];
 
-                let blk = BasicBlk {
-
-                }
-                for chunk in code_bytes.chunks_exact(4) {
-
-                }
-        }}
-    }
-    fn parse_pt_load(&mut self, elf: Elf) {
+    pub fn split_block(&mut Self, target: u64) -> (Self, Self) {
+        let id = target/4 as u64;
         todo!()
     }
 }
